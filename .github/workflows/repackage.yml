@@ -108,23 +108,36 @@ jobs:
             --title "v$ver" \
             --notes "Bitwarden ${{ steps.v.outputs.upstream }} 재포장 (아이콘만, 코드 무수정). 자동 업데이트: Pages updates.json."
 
+      # ✅ Case 1 — build + release succeeded, a new version shipped.
       - name: Notify success (ntfy)
         if: steps.check.outputs.exists == 'false' && env.NTFY_URL != ''
         run: |
           AUTH=(); [ -n "${NTFY_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $NTFY_TOKEN")
+          REL="${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ steps.v.outputs.version }}"
           curl -fsSL "${AUTH[@]}" \
-            -H "Title: bitwarden-sidebar-icon" \
-            -H "Tags: white_check_mark" \
-            -d "✅ v${{ steps.v.outputs.version }} 서명·배포 완료 — Firefox 가 하루 안에 자동 업데이트." \
-            "$NTFY_URL" || echo "ntfy 알림 실패 (무시)"
+            -H "Title: 🔐 Bitwarden (icon) updated" \
+            -H "Tags: white_check_mark,package" \
+            -H "Priority: default" \
+            -H "Click: $REL" \
+            -H "Actions: view, Open release, $REL" \
+            -d "✅ v${{ steps.v.outputs.version }} signed & published.
+          📦 Upstream: Bitwarden ${{ steps.v.outputs.upstream }}
+          🦊 Firefox will auto-update within a day." \
+            "$NTFY_URL" || echo "ntfy notify failed (ignored)"
 
+      # 🚨 Cases 2 & 3 — any failure (build, sign, pages, release, or anything else).
       - name: Notify failure (ntfy)
         if: failure() && env.NTFY_URL != ''
         run: |
           AUTH=(); [ -n "${NTFY_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $NTFY_TOKEN")
+          RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -fsSL "${AUTH[@]}" \
-            -H "Title: bitwarden-sidebar-icon 실패" \
-            -H "Priority: high" \
+            -H "Title: 🚨 Bitwarden (icon) build FAILED" \
             -H "Tags: rotating_light" \
-            -d "❌ 워크플로우 실패 — 금고 자동업데이트 멈춤. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            "$NTFY_URL" || echo "ntfy 알림 실패 (무시)"
+            -H "Priority: high" \
+            -H "Click: $RUN" \
+            -H "Actions: view, Open run logs, $RUN" \
+            -d "❌ Workflow run #${{ github.run_number }} failed.
+          ⚠️ Vault auto-updates are paused until this is fixed.
+          🔎 Check the logs to see which step broke." \
+            "$NTFY_URL" || echo "ntfy notify failed (ignored)"
