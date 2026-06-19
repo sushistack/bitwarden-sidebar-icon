@@ -11,6 +11,7 @@ set -euo pipefail
 
 SLUG="bitwarden-password-manager"        # AMO 슬러그
 NEW_ID="bitwarden-icon@sushistack"       # 별도 애드온으로 서명되도록 id 변경 (Bitwarden id 는 소유 불가)
+UPDATE_URL="https://sushistack.github.io/bitwarden-sidebar-icon/updates.json"  # 자동 업데이트(GH Pages)
 SRC_ICON="${1:-icon.png}"                # 교체할 단색 정사각 PNG (마스터 고해상도 권장)
 WORK="build"
 DIST="dist"
@@ -33,8 +34,10 @@ unzip -q "$WORK/orig.xpi" -d "$WORK/ext"
 rm -rf "$WORK/ext/META-INF" "$WORK/ext/mozilla-recommendation.json"
 
 MANIFEST="$WORK/ext/manifest.json"
-VERSION=$(jq -r '.version' "$MANIFEST")
-echo "  upstream version: $VERSION"
+UPSTREAM=$(jq -r '.version' "$MANIFEST")
+REV="${BUILD_REV:-0}"                 # CI 에서 github.run_number 주입 → 재서명마다 유니크 버전
+BUILD_VERSION="${UPSTREAM}.${REV}"    # AMO 는 id+version 중복 서명을 거부 → 4번째 자리로 회피
+echo "  upstream: $UPSTREAM  →  build: $BUILD_VERSION"
 
 echo "▶ manifest 가 참조하는 모든 아이콘 경로 수집"
 # default_icon 은 객체({size:path}) 또는 문자열(단일 path) 둘 다 가능 → 양쪽 처리.
@@ -59,11 +62,16 @@ for path in "${ICON_PATHS[@]}"; do
   echo "  swapped $path ($sz)"
 done
 
-echo "▶ manifest id/name 변경 (별도 unlisted 애드온으로 서명)"
+echo "▶ manifest id/name/version/update_url 패치 (별도 unlisted 애드온 + 자동 업데이트)"
 tmp=$(mktemp)
-jq --arg id "$NEW_ID" '.browser_specific_settings.gecko.id = $id | .name = "Bitwarden (icon)"' \
-  "$MANIFEST" > "$tmp" && mv "$tmp" "$MANIFEST"
+jq --arg id "$NEW_ID" --arg upd "$UPDATE_URL" --arg ver "$BUILD_VERSION" '
+    .browser_specific_settings.gecko.id = $id
+  | .browser_specific_settings.gecko.update_url = $upd
+  | .name = "Bitwarden (icon)"
+  | .version = $ver
+' "$MANIFEST" > "$tmp" && mv "$tmp" "$MANIFEST"
 
 cp -R "$WORK/ext" "$DIST/src"
-printf '%s' "$VERSION" > "$DIST/VERSION"
-echo "✓ dist/src 준비 완료 (version $VERSION)"
+printf '%s' "$UPSTREAM"      > "$DIST/UPSTREAM"      # 업스트림 버전 (릴리스 중복 판정용)
+printf '%s' "$BUILD_VERSION" > "$DIST/VERSION"       # 서명/태그용 빌드 버전
+echo "✓ dist/src 준비 완료 (build $BUILD_VERSION)"

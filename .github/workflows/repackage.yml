@@ -6,11 +6,23 @@ on:
     - cron: "0 6 * * 1"   # 매주 월요일 06:00 UTC — 업스트림 새 버전 확인
 
 permissions:
-  contents: write
+  contents: write   # 릴리스
+  pages: write      # GH Pages 배포 (updates.json + latest.xpi)
+  id-token: write   # deploy-pages
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  NTFY_URL: ${{ secrets.NTFY_URL }}   # 전체 토픽 URL (예: https://ntfy.sh/my-topic). 미설정 시 알림 스킵.
 
 jobs:
   repackage:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -21,20 +33,25 @@ jobs:
           npm install --global web-ext
 
       - name: Repackage (swap icons only)
+        env:
+          BUILD_REV: ${{ github.run_number }}
         run: bash repackage.sh icon.png
 
-      - name: Read upstream version
+      - name: Read versions
         id: v
-        run: echo "version=$(cat dist/VERSION)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "upstream=$(cat dist/UPSTREAM)" >> "$GITHUB_OUTPUT"
+          echo "version=$(cat dist/VERSION)"   >> "$GITHUB_OUTPUT"
 
-      - name: Skip if this version already released
+      - name: Already released for this upstream?
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "v${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+          up="${{ steps.v.outputs.upstream }}"
+          if gh release list --json tagName -q '.[].tagName' | grep -qE "^v${up//./\\.}(\.|$)"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "ℹ️ v${{ steps.v.outputs.version }} already released — nothing to do."
+            echo "ℹ️ upstream $up already released — nothing to do."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
@@ -52,11 +69,64 @@ jobs:
             --api-key="$WEB_EXT_API_KEY" \
             --api-secret="$WEB_EXT_API_SECRET"
 
+      - name: Assemble Pages site (updates.json + latest.xpi)
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          mkdir -p site
+          cp signed/*.xpi site/latest.xpi
+          ver="${{ steps.v.outputs.version }}"
+          cat > site/updates.json <<EOF
+          {
+            "addons": {
+              "bitwarden-icon@sushistack": {
+                "updates": [
+                  { "version": "$ver", "update_link": "https://sushistack.github.io/bitwarden-sidebar-icon/latest.xpi" }
+                ]
+              }
+            }
+          }
+          EOF
+
+      - uses: actions/configure-pages@v5
+        if: steps.check.outputs.exists == 'false'
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.check.outputs.exists == 'false'
+        with:
+          path: site
+
+      - name: Deploy Pages
+        id: deploy
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/deploy-pages@v4
+
       - name: Publish GitHub release
         if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ steps.v.outputs.version }}" signed/*.xpi \
-            --title "v${{ steps.v.outputs.version }}" \
-            --notes "Bitwarden ${{ steps.v.outputs.version }} 재포장 (아이콘만 교체, 코드 무수정)."
+          ver="${{ steps.v.outputs.version }}"
+          gh release create "v$ver" signed/*.xpi \
+            --title "v$ver" \
+            --notes "Bitwarden ${{ steps.v.outputs.upstream }} 재포장 (아이콘만, 코드 무수정). 자동 업데이트: Pages updates.json."
+
+      - name: Notify success (ntfy)
+        if: steps.check.outputs.exists == 'false' && env.NTFY_URL != ''
+        run: |
+          curl -fsSL \
+            -H "Title: bitwarden-sidebar-icon" \
+            -H "Tags: white_check_mark" \
+            -d "✅ v${{ steps.v.outputs.version }} 서명·배포 완료 — Firefox 가 하루 안에 자동 업데이트." \
+            "$NTFY_URL"
+
+      - name: Notify failure (ntfy)
+        if: failure() && env.NTFY_URL != ''
+        run: |
+          curl -fsSL \
+            -H "Title: bitwarden-sidebar-icon 실패" \
+            -H "Priority: high" \
+            -H "Tags: rotating_light" \
+            -d "❌ 워크플로우 실패 — 금고 자동업데이트 멈춤. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "$NTFY_URL"
