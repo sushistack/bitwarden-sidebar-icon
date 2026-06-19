@@ -81,7 +81,7 @@ jobs:
             "addons": {
               "bitwarden-icon@sushistack": {
                 "updates": [
-                  { "version": "$ver", "update_link": "https://deeplify.dev/bitwarden-sidebar-icon/latest.xpi" }
+                  { "version": "$ver", "update_link": "https://sushistack.github.io/bitwarden-sidebar-icon/latest.xpi" }
                 ]
               }
             }
