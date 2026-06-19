@@ -27,6 +27,10 @@ curl -fsSL -o "$WORK/orig.xpi" "https://addons.mozilla.org/firefox/downloads/lat
 echo "▶ 압축 해제"
 unzip -q "$WORK/orig.xpi" -d "$WORK/ext"
 
+# 공식 xpi 는 이미 서명돼 있어 META-INF/ 에 기존 서명 파일이 들어있다.
+# AMO 가 예약 파일명으로 막으므로(재서명 불가) 먼저 제거.
+rm -rf "$WORK/ext/META-INF"
+
 MANIFEST="$WORK/ext/manifest.json"
 VERSION=$(jq -r '.version' "$MANIFEST")
 echo "  upstream version: $VERSION"
