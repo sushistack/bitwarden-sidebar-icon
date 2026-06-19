@@ -1,0 +1,5 @@
+build/
+dist/
+signed/
+web-ext-artifacts/
+*.xpi

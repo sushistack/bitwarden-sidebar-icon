@@ -1,0 +1,62 @@
+name: repackage
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"   # 매주 월요일 06:00 UTC — 업스트림 새 버전 확인
+
+permissions:
+  contents: write
+
+jobs:
+  repackage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y imagemagick jq
+          npm install --global web-ext
+
+      - name: Repackage (swap icons only)
+        run: bash repackage.sh icon.png
+
+      - name: Read upstream version
+        id: v
+        run: echo "version=$(cat dist/VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if this version already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "ℹ️ v${{ steps.v.outputs.version }} already released — nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign with AMO (unlisted)
+        if: steps.check.outputs.exists == 'false'
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+        run: |
+          web-ext sign \
+            --source-dir=dist/src \
+            --artifacts-dir=./signed \
+            --channel=unlisted \
+            --api-key="$WEB_EXT_API_KEY" \
+            --api-secret="$WEB_EXT_API_SECRET"
+
+      - name: Publish GitHub release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.v.outputs.version }}" signed/*.xpi \
+            --title "v${{ steps.v.outputs.version }}" \
+            --notes "Bitwarden ${{ steps.v.outputs.version }} 재포장 (아이콘만 교체, 코드 무수정)."
