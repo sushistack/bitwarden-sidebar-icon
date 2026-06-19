@@ -15,7 +15,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NTFY_URL: ${{ secrets.NTFY_URL }}   # 전체 토픽 URL (예: https://ntfy.sh/my-topic). 미설정 시 알림 스킵.
+  NTFY_URL: ${{ secrets.NTFY_URL }}       # 전체 토픽 URL (예: https://ntfy.sh/my-topic). 미설정 시 알림 스킵.
+  NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}   # self-hosted 인증용 Bearer 토큰 (선택). 익명 publish 가능하면 불필요.
 
 jobs:
   repackage:
@@ -80,17 +81,12 @@ jobs:
             "addons": {
               "bitwarden-icon@sushistack": {
                 "updates": [
-                  { "version": "$ver", "update_link": "https://sushistack.github.io/bitwarden-sidebar-icon/latest.xpi" }
+                  { "version": "$ver", "update_link": "https://deeplify.dev/bitwarden-sidebar-icon/latest.xpi" }
                 ]
               }
             }
           }
           EOF
-
-      - uses: actions/configure-pages@v5
-        if: steps.check.outputs.exists == 'false'
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         if: steps.check.outputs.exists == 'false'
@@ -115,18 +111,20 @@ jobs:
       - name: Notify success (ntfy)
         if: steps.check.outputs.exists == 'false' && env.NTFY_URL != ''
         run: |
-          curl -fsSL \
+          AUTH=(); [ -n "${NTFY_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $NTFY_TOKEN")
+          curl -fsSL "${AUTH[@]}" \
             -H "Title: bitwarden-sidebar-icon" \
             -H "Tags: white_check_mark" \
             -d "✅ v${{ steps.v.outputs.version }} 서명·배포 완료 — Firefox 가 하루 안에 자동 업데이트." \
-            "$NTFY_URL"
+            "$NTFY_URL" || echo "ntfy 알림 실패 (무시)"
 
       - name: Notify failure (ntfy)
         if: failure() && env.NTFY_URL != ''
         run: |
-          curl -fsSL \
+          AUTH=(); [ -n "${NTFY_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $NTFY_TOKEN")
+          curl -fsSL "${AUTH[@]}" \
             -H "Title: bitwarden-sidebar-icon 실패" \
             -H "Priority: high" \
             -H "Tags: rotating_light" \
             -d "❌ 워크플로우 실패 — 금고 자동업데이트 멈춤. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            "$NTFY_URL"
+            "$NTFY_URL" || echo "ntfy 알림 실패 (무시)"
