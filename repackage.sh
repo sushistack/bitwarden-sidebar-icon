@@ -11,7 +11,7 @@ set -euo pipefail
 
 SLUG="bitwarden-password-manager"        # AMO 슬러그
 NEW_ID="bitwarden-icon@sushistack"       # 별도 애드온으로 서명되도록 id 변경 (Bitwarden id 는 소유 불가)
-UPDATE_URL="https://sushistack.github.io/bitwarden-sidebar-icon/updates.json"  # 자동 업데이트(GH Pages). 불변 URL이라 커스텀 도메인보다 안 바뀌는 github.io 사용
+UPDATE_URL="https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/updates.json"  # 'latest' 고정 릴리스의 에셋 (Pages 불필요)
 SRC_ICON="${1:-icon.png}"                # 교체할 단색 정사각 PNG (마스터 고해상도 권장)
 WORK="build"
 DIST="dist"

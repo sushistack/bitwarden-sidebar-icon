@@ -6,24 +6,18 @@ on:
     - cron: "0 6 * * 1"   # 매주 월요일 06:00 UTC — 업스트림 새 버전 확인
 
 permissions:
-  contents: write   # 릴리스
-  pages: write      # GH Pages 배포 (updates.json + latest.xpi)
-  id-token: write   # deploy-pages
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
+  contents: write   # 릴리스 생성/에셋 교체
 
 env:
-  NTFY_URL: ${{ secrets.NTFY_URL }}       # 전체 토픽 URL (예: https://ntfy.sh/my-topic). 미설정 시 알림 스킵.
-  NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}   # self-hosted 인증용 Bearer 토큰 (선택). 익명 publish 가능하면 불필요.
+  NTFY_URL: ${{ secrets.NTFY_URL }}       # 전체 토픽 URL (예: https://notify.eli.kr/sidebars). 미설정 시 알림 스킵.
+  NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}   # self-hosted 인증용 Bearer 토큰 (선택)
+  # 자동 업데이트용 고정 URL — 'latest' 태그 릴리스의 에셋을 --clobber 로 교체하므로 영구 불변.
+  UPDATE_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/updates.json"
+  XPI_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/bitwarden-icon.xpi"
 
 jobs:
   repackage:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,15 +38,13 @@ jobs:
           echo "upstream=$(cat dist/UPSTREAM)" >> "$GITHUB_OUTPUT"
           echo "version=$(cat dist/VERSION)"   >> "$GITHUB_OUTPUT"
 
-      - name: Already released for this upstream?
+      - name: Already shipped this upstream?
         id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          up="${{ steps.v.outputs.upstream }}"
-          if gh release list --json tagName -q '.[].tagName' | grep -qE "^v${up//./\\.}(\.|$)"; then
+          cur=$(curl -fsSL "$UPDATE_URL" | jq -r '.addons["bitwarden-icon@sushistack"].updates[0].version' 2>/dev/null || echo "")
+          if [ "${cur%.*}" = "${{ steps.v.outputs.upstream }}" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "ℹ️ upstream $up already released — nothing to do."
+            echo "ℹ️ upstream ${{ steps.v.outputs.upstream }} already shipped ($cur) — nothing to do."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
@@ -70,50 +62,39 @@ jobs:
             --api-key="$WEB_EXT_API_KEY" \
             --api-secret="$WEB_EXT_API_SECRET"
 
-      - name: Assemble Pages site (updates.json + latest.xpi)
+      - name: Build updates.json + stable-named xpi
         if: steps.check.outputs.exists == 'false'
         run: |
-          mkdir -p site
-          cp signed/*.xpi site/latest.xpi
+          cp signed/*.xpi bitwarden-icon.xpi
           ver="${{ steps.v.outputs.version }}"
-          cat > site/updates.json <<EOF
+          cat > updates.json <<EOF
           {
             "addons": {
               "bitwarden-icon@sushistack": {
                 "updates": [
-                  { "version": "$ver", "update_link": "https://sushistack.github.io/bitwarden-sidebar-icon/latest.xpi" }
+                  { "version": "$ver", "update_link": "$XPI_URL" }
                 ]
               }
             }
           }
           EOF
 
-      - uses: actions/upload-pages-artifact@v3
-        if: steps.check.outputs.exists == 'false'
-        with:
-          path: site
-
-      - name: Deploy Pages
-        id: deploy
-        if: steps.check.outputs.exists == 'false'
-        uses: actions/deploy-pages@v4
-
-      - name: Publish GitHub release
+      - name: Publish to 'latest' release (stable URLs)
         if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ver="${{ steps.v.outputs.version }}"
-          gh release create "v$ver" signed/*.xpi \
-            --title "v$ver" \
-            --notes "Bitwarden ${{ steps.v.outputs.upstream }} 재포장 (아이콘만, 코드 무수정). 자동 업데이트: Pages updates.json."
+          gh release view latest >/dev/null 2>&1 \
+            || gh release create latest --title "latest" \
+                 --notes "자동 업데이트 채널. 빌드마다 bitwarden-icon.xpi + updates.json 을 교체한다."
+          gh release upload latest bitwarden-icon.xpi updates.json --clobber
 
       # ✅ Case 1 — build + release succeeded, a new version shipped.
       - name: Notify success (ntfy)
         if: steps.check.outputs.exists == 'false' && env.NTFY_URL != ''
         run: |
           AUTH=(); [ -n "${NTFY_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $NTFY_TOKEN")
-          REL="${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ steps.v.outputs.version }}"
+          REL="${{ github.server_url }}/${{ github.repository }}/releases/tag/latest"
           curl -fsSL "${AUTH[@]}" \
             -H "Title: 🔐 Bitwarden (icon) updated" \
             -H "Tags: white_check_mark,package" \
@@ -125,7 +106,7 @@ jobs:
           🦊 Firefox will auto-update within a day." \
             "$NTFY_URL" || echo "ntfy notify failed (ignored)"
 
-      # 🚨 Cases 2 & 3 — any failure (build, sign, pages, release, or anything else).
+      # 🚨 Cases 2 & 3 — any failure (build, sign, release, or anything else).
       - name: Notify failure (ntfy)
         if: failure() && env.NTFY_URL != ''
         run: |
