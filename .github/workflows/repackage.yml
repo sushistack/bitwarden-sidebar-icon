@@ -97,13 +97,15 @@ jobs:
           REL="${{ github.server_url }}/${{ github.repository }}/releases/tag/latest"
           curl -fsSL "${AUTH[@]}" \
             -H "Title: 🔐 Bitwarden (icon) updated" \
-            -H "Tags: white_check_mark,package" \
+            -H "Tags: card,white_check_mark,package" \
             -H "Priority: default" \
             -H "Click: $REL" \
             -H "Actions: view, Open release, $REL" \
-            -d "✅ v${{ steps.v.outputs.version }} signed & published.
-          📦 Upstream: Bitwarden ${{ steps.v.outputs.upstream }}
-          🦊 Firefox will auto-update within a day." \
+            -d '{"type":"kv","rows":[
+              {"key":"Status","value":"signed & published","status":"ok"},
+              {"key":"Version","value":"v${{ steps.v.outputs.version }}","icon":"version"},
+              {"key":"Upstream","value":"Bitwarden ${{ steps.v.outputs.upstream }}","icon":"package"},
+              {"key":"Update","value":"Firefox auto-updates within a day","icon":"uptime"}]}' \
             "$NTFY_URL" || echo "ntfy notify failed (ignored)"
 
       # 🚨 Cases 2 & 3 — any failure (build, sign, release, or anything else).
@@ -114,11 +116,13 @@ jobs:
           RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -fsSL "${AUTH[@]}" \
             -H "Title: 🚨 Bitwarden (icon) build FAILED" \
-            -H "Tags: rotating_light" \
+            -H "Tags: card,rotating_light" \
             -H "Priority: high" \
             -H "Click: $RUN" \
             -H "Actions: view, Open run logs, $RUN" \
-            -d "❌ Workflow run #${{ github.run_number }} failed.
-          ⚠️ Vault auto-updates are paused until this is fixed.
-          🔎 Check the logs to see which step broke." \
+            -d '{"type":"kv","rows":[
+              {"key":"Status","value":"build failed","status":"error"},
+              {"key":"Run","value":"#${{ github.run_number }}","status":"error","icon":"error"},
+              {"key":"Impact","value":"auto-updates paused","status":"warn","icon":"warning"},
+              {"key":"Next","value":"check the run logs","icon":"status"}]}' \
             "$NTFY_URL" || echo "ntfy notify failed (ignored)"
