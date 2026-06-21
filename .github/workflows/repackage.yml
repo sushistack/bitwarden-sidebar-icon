@@ -95,12 +95,13 @@ jobs:
         run: |
           AUTH=(); [ -n "${NTFY_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $NTFY_TOKEN")
           REL="${{ github.server_url }}/${{ github.repository }}/releases/tag/latest"
+          RUNS="${{ github.server_url }}/${{ github.repository }}/actions"
           curl -fsSL "${AUTH[@]}" \
-            -H "Title: 🔐 Bitwarden (icon) updated" \
+            -H "Title: 🔐 Bitwarden sidebar updated" \
             -H "Tags: card,white_check_mark,package" \
             -H "Priority: default" \
             -H "Click: $REL" \
-            -H "Actions: view, Open release, $REL" \
+            -H "Actions: view, Open release, $REL; view, GitHub runs, $RUNS" \
             -d '{"type":"kv","rows":[
               {"key":"Status","value":"signed & published","status":"ok"},
               {"key":"Version","value":"v${{ steps.v.outputs.version }}","icon":"version"},
@@ -115,7 +116,7 @@ jobs:
           AUTH=(); [ -n "${NTFY_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $NTFY_TOKEN")
           RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -fsSL "${AUTH[@]}" \
-            -H "Title: 🚨 Bitwarden (icon) build FAILED" \
+            -H "Title: 🚨 Bitwarden sidebar build FAILED" \
             -H "Tags: card,rotating_light" \
             -H "Priority: high" \
             -H "Click: $RUN" \
