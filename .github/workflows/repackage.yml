@@ -22,6 +22,7 @@ env:
   NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}   # self-hosted 인증용 Bearer 토큰 (선택)
   # 자동 업데이트용 고정 URL — 'latest' 태그 릴리스의 에셋을 --clobber 로 교체하므로 영구 불변.
   UPDATE_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/updates.json"
+  UPSTREAM_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/UPSTREAM.txt"
   XPI_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/bitwarden-icon.xpi"
 
 jobs:
@@ -52,8 +53,10 @@ jobs:
       - name: Already shipped this upstream?
         id: check
         run: |
-          cur=$(curl -fsSL "$UPDATE_URL" | jq -r '.addons["bitwarden-icon@sushistack"].updates[0].version' 2>/dev/null || echo "")
-          if [ "${cur%.*}" = "${{ steps.v.outputs.upstream }}" ]; then
+          # 배포 버전에서 업스트림을 추론하지 않는다 — version_override 를 쓰면 둘이 어긋난다.
+          # 마지막으로 발행한 업스트림 버전을 릴리스 에셋에 그대로 기록해 두고 그걸 읽는다.
+          cur=$(curl -fsSL "$UPSTREAM_URL" 2>/dev/null || echo "")
+          if [ "$cur" = "${{ steps.v.outputs.upstream }}" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "ℹ️ upstream ${{ steps.v.outputs.upstream }} already shipped ($cur) — nothing to do."
           else
@@ -77,6 +80,7 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: |
           cp signed/*.xpi bitwarden-icon.xpi
+          cp dist/UPSTREAM UPSTREAM.txt        # 이번에 발행한 업스트림 버전 (다음 실행의 중복 판정 기준)
           ver="${{ steps.v.outputs.version }}"
           cat > updates.json <<EOF
           {
@@ -98,7 +102,7 @@ jobs:
           gh release view latest >/dev/null 2>&1 \
             || gh release create latest --title "latest" \
                  --notes "자동 업데이트 채널. 빌드마다 bitwarden-icon.xpi + updates.json 을 교체한다."
-          gh release upload latest bitwarden-icon.xpi updates.json --clobber
+          gh release upload latest bitwarden-icon.xpi updates.json UPSTREAM.txt --clobber
 
       # ✅ Case 1 — build + release succeeded, a new version shipped.
       - name: Notify success (ntfy)
