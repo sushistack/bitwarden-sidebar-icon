@@ -8,7 +8,7 @@ Firefox 업데이트마다 깨지지 않음).
 
 `repackage.sh` → GH Actions(`repackage.yml`):
 
-1. AMO에서 **최신 공식 Bitwarden xpi** 다운로드
+1. AMO에서 **14일 이상 묵은 최신 공식 Bitwarden xpi** 다운로드 (숙성 — 아래 참고)
 2. manifest가 참조하는 모든 아이콘(`icons`, `action`, `sidebar_action`, `theme_icons`)을
    `icon.png` 로 리사이즈 교체
 3. `browser_specific_settings.gecko.id` 를 `bitwarden-icon@sushistack` 로 변경 (별도 애드온)
@@ -16,6 +16,24 @@ Firefox 업데이트마다 깨지지 않음).
 5. `latest` 고정 릴리스에 `bitwarden-icon.xpi` + `updates.json` 을 `--clobber` 로 교체 발행
 
 매주(월) + 수동(`workflow_dispatch`) 실행. 현재 배포된 업스트림과 같으면 건너뜀.
+
+## 숙성 & 롤백
+
+업스트림 회귀(예: 2026.7.0 의 WASM SDK 크래시로 보관함 무한 로딩)는 CI 가 못 잡는다.
+빌드·서명은 정상이고 실제 볼트 데이터를 복호화할 때만 터지기 때문. 그래서 **시간**으로 거른다.
+
+- **숙성**: AMO 공개 후 `SOAK_DAYS`(기본 14일)가 지난 릴리스만 채택. 회귀는 대개 며칠 안에 신고·패치된다.
+- **긴급 우회**: `workflow_dispatch` 의 `pin_version` 에 버전을 주면 숙성을 건너뛰고 즉시 당겨온다.
+- **롤백**: `pin_version` = 되돌릴 업스트림 버전, `version_override` = 현재 배포본보다 **높은** 버전 문자열.
+  Firefox 는 자동 업데이트로 다운그레이드를 하지 않으므로, 옛 코드에 높은 버전을 찍어야
+  이미 깨진 채 설치된 확장이 수동 개입 없이 스스로 복구된다.
+
+  ```
+  gh workflow run repackage.yml -f pin_version=2026.6.1 -f version_override=2026.7.0.15
+  ```
+
+  이러면 중복 판정(`${cur%.*}`)이 `2026.7.0` 을 이미 배포된 것으로 읽어,
+  업스트림이 2026.7.0 에 머무는 동안 주간 cron 이 깨진 버전을 다시 집어오지 않는다.
 
 ## 셋업
 

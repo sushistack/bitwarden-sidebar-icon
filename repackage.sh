@@ -13,6 +13,8 @@ SLUG="bitwarden-password-manager"        # AMO 슬러그
 NEW_ID="bitwarden-icon@sushistack"       # 별도 애드온으로 서명되도록 id 변경 (Bitwarden id 는 소유 불가)
 UPDATE_URL="https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/updates.json"  # 'latest' 고정 릴리스의 에셋 (Pages 불필요)
 SRC_ICON="${1:-icon.png}"                # 교체할 단색 정사각 PNG (마스터 고해상도 권장)
+AMO_API="https://addons.mozilla.org/api/v5/addons/addon/$SLUG/versions/?page_size=25"
+SOAK_DAYS="${SOAK_DAYS:-14}"             # AMO 공개 후 이 일수가 지난 릴리스만 채택 (업스트림 회귀 숙성)
 WORK="build"
 DIST="dist"
 
@@ -22,15 +24,23 @@ command -v jq      >/dev/null || { echo "✗ jq 필요" >&2; exit 1; }
 rm -rf "$WORK" "$DIST"
 mkdir -p "$WORK/ext" "$DIST"
 
-# PIN_VERSION 지정 시 해당 업스트림 버전으로 고정 (업스트림 회귀 발생 시 롤백용).
+# PIN_VERSION 지정 시 해당 업스트림 버전으로 고정 — 롤백용이자 숙성 우회용
+# (급한 보안 패치는 workflow_dispatch 로 pin_version 을 주면 즉시 당겨온다).
 if [ -n "${PIN_VERSION:-}" ]; then
-  echo "▶ 업스트림 $PIN_VERSION 고정 다운로드"
-  XPI_SRC=$(curl -fsSL "https://addons.mozilla.org/api/v5/addons/addon/$SLUG/versions/?page_size=25" \
-    | jq -r --arg v "$PIN_VERSION" '.results[] | select(.version == $v) | .file.url')
+  echo "▶ 업스트림 $PIN_VERSION 고정 다운로드 (숙성 우회)"
+  XPI_SRC=$(curl -fsSL "$AMO_API" | jq -r --arg v "$PIN_VERSION" '
+    .results[] | select(.version == $v) | .file.url')
   [ -n "$XPI_SRC" ] || { echo "✗ AMO 최근 25개 버전에 $PIN_VERSION 없음" >&2; exit 1; }
 else
-  echo "▶ 최신 공식 xpi 다운로드 ($SLUG)"
-  XPI_SRC="https://addons.mozilla.org/firefox/downloads/latest/$SLUG/latest.xpi"
+  # 갓 나온 릴리스는 건너뛴다. 업스트림 회귀는 대개 며칠 안에 신고·패치되므로,
+  # 숙성만으로 CI 가 잡을 수 없는 런타임 버그 대부분을 걸러낸다.
+  echo "▶ ${SOAK_DAYS}일 이상 묵은 최신 업스트림 탐색 ($SLUG)"
+  XPI_SRC=$(curl -fsSL "$AMO_API" | jq -r --argjson soak "$SOAK_DAYS" '
+      .results
+    | map(select((.file.created | fromdateiso8601) < (now - 86400 * $soak)))
+    | sort_by(.file.created) | reverse
+    | .[0].file.url // empty')
+  [ -n "$XPI_SRC" ] || { echo "✗ ${SOAK_DAYS}일 넘게 묵은 업스트림 릴리스가 없음" >&2; exit 1; }
 fi
 curl -fsSL -o "$WORK/orig.xpi" "$XPI_SRC"
 
