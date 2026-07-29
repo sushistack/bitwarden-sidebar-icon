@@ -2,6 +2,15 @@ name: repackage
 
 on:
   workflow_dispatch:
+    inputs:
+      pin_version:
+        description: "업스트림 AMO 버전 고정 (롤백용, 비우면 최신)"
+        required: false
+        default: ""
+      version_override:
+        description: "서명할 빌드 버전 강제 지정 (롤백 시 현재 배포본보다 높게)"
+        required: false
+        default: ""
   schedule:
     - cron: "0 6 * * 1"   # 매주 월요일 06:00 UTC — 업스트림 새 버전 확인
 
@@ -30,6 +39,8 @@ jobs:
       - name: Repackage (swap icons only)
         env:
           BUILD_REV: ${{ github.run_number }}
+          PIN_VERSION: ${{ inputs.pin_version }}          # schedule 트리거에선 빈 문자열
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
         run: bash repackage.sh icon.png
 
       - name: Read versions

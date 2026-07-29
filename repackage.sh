@@ -22,8 +22,17 @@ command -v jq      >/dev/null || { echo "✗ jq 필요" >&2; exit 1; }
 rm -rf "$WORK" "$DIST"
 mkdir -p "$WORK/ext" "$DIST"
 
-echo "▶ 최신 공식 xpi 다운로드 ($SLUG)"
-curl -fsSL -o "$WORK/orig.xpi" "https://addons.mozilla.org/firefox/downloads/latest/$SLUG/latest.xpi"
+# PIN_VERSION 지정 시 해당 업스트림 버전으로 고정 (업스트림 회귀 발생 시 롤백용).
+if [ -n "${PIN_VERSION:-}" ]; then
+  echo "▶ 업스트림 $PIN_VERSION 고정 다운로드"
+  XPI_SRC=$(curl -fsSL "https://addons.mozilla.org/api/v5/addons/addon/$SLUG/versions/?page_size=25" \
+    | jq -r --arg v "$PIN_VERSION" '.results[] | select(.version == $v) | .file.url')
+  [ -n "$XPI_SRC" ] || { echo "✗ AMO 최근 25개 버전에 $PIN_VERSION 없음" >&2; exit 1; }
+else
+  echo "▶ 최신 공식 xpi 다운로드 ($SLUG)"
+  XPI_SRC="https://addons.mozilla.org/firefox/downloads/latest/$SLUG/latest.xpi"
+fi
+curl -fsSL -o "$WORK/orig.xpi" "$XPI_SRC"
 
 echo "▶ 압축 해제"
 unzip -q "$WORK/orig.xpi" -d "$WORK/ext"
@@ -36,7 +45,10 @@ rm -rf "$WORK/ext/META-INF" "$WORK/ext/mozilla-recommendation.json"
 MANIFEST="$WORK/ext/manifest.json"
 UPSTREAM=$(jq -r '.version' "$MANIFEST")
 REV="${BUILD_REV:-0}"                 # CI 에서 github.run_number 주입 → 재서명마다 유니크 버전
-BUILD_VERSION="${UPSTREAM}.${REV}"    # AMO 는 id+version 중복 서명을 거부 → 4번째 자리로 회피
+# AMO 는 id+version 중복 서명을 거부 → 4번째 자리로 회피.
+# VERSION_OVERRIDE: 롤백 시 필요. Firefox 는 버전이 내려가면 자동 업데이트를 안 하므로,
+# 옛 코드를 담되 버전 문자열은 현재 배포본보다 높게 찍어야 깨진 설치본이 스스로 복구된다.
+BUILD_VERSION="${VERSION_OVERRIDE:-${UPSTREAM}.${REV}}"
 echo "  upstream: $UPSTREAM  →  build: $BUILD_VERSION"
 
 echo "▶ manifest 가 참조하는 모든 아이콘 경로 수집"
