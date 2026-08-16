@@ -3,6 +3,11 @@ name: repackage
 on:
   workflow_dispatch:
     inputs:
+      publish:
+        description: "검증 완료 후 latest 릴리스로 실제 배포"
+        required: true
+        type: boolean
+        default: false
       pin_version:
         description: "업스트림 AMO 버전 고정 (롤백용, 비우면 최신)"
         required: false
@@ -24,7 +29,7 @@ env:
   UPDATE_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/updates.json"
   UPSTREAM_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/UPSTREAM.txt"
   XPI_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/bitwarden-icon.xpi"
-  BLOCKED_VERSIONS: "2026.7.0"  # vault 목록 무한 로딩(WASM SDK 회귀)
+  BLOCKED_VERSIONS: "2026.7.0"  # legacy/Vaultwarden 호환성 문제로 vault 목록 무한 로딩
 
 jobs:
   repackage:
@@ -51,6 +56,15 @@ jobs:
           echo "upstream=$(cat dist/UPSTREAM)" >> "$GITHUB_OUTPUT"
           echo "version=$(cat dist/VERSION)"   >> "$GITHUB_OUTPUT"
 
+      - name: Decide whether publishing was explicitly approved
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.publish }}" = "true" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Already shipped this upstream?
         id: check
         run: |
@@ -65,7 +79,7 @@ jobs:
           fi
 
       - name: Sign with AMO (unlisted)
-        if: steps.check.outputs.exists == 'false'
+        if: steps.check.outputs.exists == 'false' && steps.mode.outputs.publish == 'true'
         env:
           WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
           WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
@@ -78,7 +92,7 @@ jobs:
             --api-secret="$WEB_EXT_API_SECRET"
 
       - name: Build updates.json + stable-named xpi
-        if: steps.check.outputs.exists == 'false'
+        if: steps.check.outputs.exists == 'false' && steps.mode.outputs.publish == 'true'
         run: |
           cp signed/*.xpi bitwarden-icon.xpi
           cp dist/UPSTREAM UPSTREAM.txt        # 이번에 발행한 업스트림 버전 (다음 실행의 중복 판정 기준)
@@ -96,7 +110,7 @@ jobs:
           EOF
 
       - name: Publish to 'latest' release (stable URLs)
-        if: steps.check.outputs.exists == 'false'
+        if: steps.check.outputs.exists == 'false' && steps.mode.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -107,7 +121,7 @@ jobs:
 
       # ✅ Case 1 — build + release succeeded, a new version shipped.
       - name: Notify success (ntfy)
-        if: steps.check.outputs.exists == 'false' && env.NTFY_URL != ''
+        if: steps.check.outputs.exists == 'false' && steps.mode.outputs.publish == 'true' && env.NTFY_URL != ''
         run: |
           AUTH=(); [ -n "${NTFY_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $NTFY_TOKEN")
           REL="${{ github.server_url }}/${{ github.repository }}/releases/tag/latest"
@@ -123,6 +137,24 @@ jobs:
               {"key":"Version","value":"v${{ steps.v.outputs.version }}","icon":"version"},
               {"key":"Upstream","value":"Bitwarden ${{ steps.v.outputs.upstream }}","icon":"package"},
               {"key":"Update","value":"Firefox auto-updates within a day","icon":"uptime"}]}' \
+            "$NTFY_URL" || echo "ntfy notify failed (ignored)"
+
+      # Scheduled runs only detect candidates. Publishing always requires a manual checkbox.
+      - name: Notify candidate awaiting approval (ntfy)
+        if: steps.check.outputs.exists == 'false' && steps.mode.outputs.publish == 'false' && env.NTFY_URL != ''
+        run: |
+          AUTH=(); [ -n "${NTFY_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $NTFY_TOKEN")
+          FLOW="${{ github.server_url }}/${{ github.repository }}/actions/workflows/repackage.yml"
+          curl -fsSL "${AUTH[@]}" \
+            -H "Title: Bitwarden update awaiting approval" \
+            -H "Tags: card,hourglass_flowing_sand,package" \
+            -H "Priority: default" \
+            -H "Click: $FLOW" \
+            -H "Actions: view, Review and publish, $FLOW" \
+            -d '{"type":"kv","rows":[
+              {"key":"Status","value":"not published","status":"warn"},
+              {"key":"Candidate","value":"Bitwarden ${{ steps.v.outputs.upstream }}","icon":"package"},
+              {"key":"Next","value":"test upstream, then run with publish checked","icon":"status"}]}' \
             "$NTFY_URL" || echo "ntfy notify failed (ignored)"
 
       # 🚨 Cases 2 & 3 — any failure (build, sign, release, or anything else).

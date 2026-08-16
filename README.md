@@ -13,26 +13,30 @@ Firefox 업데이트마다 깨지지 않음).
 2. manifest가 참조하는 모든 아이콘(`icons`, `action`, `sidebar_action`, `theme_icons`)을
    `icon.png` 로 리사이즈 교체
 3. `browser_specific_settings.gecko.id` 를 `bitwarden-icon@sushistack` 로 변경 (별도 애드온)
-4. `web-ext sign --channel unlisted` 로 AMO 자동 서명
-5. `latest` 고정 릴리스에 `bitwarden-icon.xpi` + `updates.json` 을 `--clobber` 로 교체 발행
+4. 예약 실행은 새 후보 알림만 전송하고 종료
+5. 수동 실행에서 `publish`를 체크한 경우에만 AMO 서명 후 `latest` 릴리스 교체
 
-매주(월) + 수동(`workflow_dispatch`) 실행. 현재 배포된 업스트림과 같으면 건너뜀.
+매주 월요일 후보를 확인하지만 자동 배포하지 않는다. 현재 배포된 업스트림과 같으면 건너뛰고,
+새 후보는 직접 확인한 뒤 `workflow_dispatch`의 `publish` 체크박스로 승인한다.
 
 ## 숙성 & 롤백
 
-업스트림 회귀(예: 2026.7.0 의 WASM SDK 크래시로 보관함 무한 로딩)는 CI 가 못 잡는다.
-빌드·서명은 정상이고 실제 볼트 데이터를 복호화할 때만 터지기 때문. 그래서 **시간**으로 거른다.
+업스트림 회귀(예: 2026.7.0의 legacy 암호화/Vaultwarden 호환 문제로 보관함 무한 로딩)는
+정적 CI가 잡을 수 없다. 빌드·서명은 정상이고 실제 볼트 데이터를 복호화할 때만 터지기 때문에
+숙성 기간과 수동 승인을 함께 사용한다.
 
 - **숙성**: AMO 공개 후 `SOAK_DAYS`(기본 14일)가 지난 릴리스만 채택. 회귀는 대개 며칠 안에 신고·패치된다.
 - **회귀 차단**: `BLOCKED_VERSIONS`(쉼표 구분)에 적힌 버전은 숙성 기간이 지나도 채택하지 않는다.
-  현재 `2026.7.0`은 WASM SDK 회귀로 Vault 목록이 무한 로딩되어 차단되어 있다.
+  현재 `2026.7.0`은 legacy 복호화 경로의 호환 문제로 Vault 목록이 무한 로딩되어 차단되어 있다.
+- **수동 승인**: 예약 실행은 절대 서명하거나 배포하지 않는다. 공식 확장을 실제 계정으로 확인한 뒤
+  수동 실행 화면에서 `publish`를 체크해야만 `latest`가 교체된다.
 - **긴급 우회**: `workflow_dispatch` 의 `pin_version` 에 버전을 주면 숙성을 건너뛰고 즉시 당겨온다.
 - **롤백**: `pin_version` = 되돌릴 업스트림 버전. Firefox 는 자동 업데이트로 다운그레이드를
   하지 않으므로, 스크립트가 옛 코드에 최신 업스트림 기반의 높은 빌드 버전을 자동으로 찍는다.
   필요하면 `version_override`로 그 버전 문자열을 직접 지정할 수도 있다.
 
   ```
-  gh workflow run repackage.yml -f pin_version=2026.6.1
+  gh workflow run repackage.yml -f publish=true -f pin_version=2026.6.1
   ```
 
   최신 버전보다 오래된 코드를 고르면 빌드 버전은 자동으로 `<최신 업스트림>.<run_number>`가 된다.
@@ -51,7 +55,7 @@ Firefox 업데이트마다 깨지지 않음).
 ## 자동 업데이트
 
 - manifest `update_url` → `…/releases/download/latest/updates.json` (고정 `latest` 릴리스 에셋).
-- 빌드마다 `latest` 릴리스의 `updates.json` + `bitwarden-icon.xpi` 를 교체 → URL은 영구 불변.
+- 수동 승인된 빌드만 `latest`의 `updates.json` + `bitwarden-icon.xpi`를 교체한다.
 - Firefox가 하루 안에 **조용히 자동 업데이트**(권한 변화 없으니 사용자 알림 없음).
 - **단, update_url 이 박힌 빌드를 한 번은 수동 설치**해야 이후 자동 업데이트가 작동한다.
 
