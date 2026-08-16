@@ -15,6 +15,7 @@ UPDATE_URL="https://github.com/sushistack/bitwarden-sidebar-icon/releases/downlo
 SRC_ICON="${1:-icon.png}"                # 교체할 단색 정사각 PNG (마스터 고해상도 권장)
 AMO_API="https://addons.mozilla.org/api/v5/addons/addon/$SLUG/versions/?page_size=25"
 SOAK_DAYS="${SOAK_DAYS:-14}"             # AMO 공개 후 이 일수가 지난 릴리스만 채택 (업스트림 회귀 숙성)
+BLOCKED_VERSIONS="${BLOCKED_VERSIONS:-2026.7.0}" # 확인된 회귀 버전 (쉼표 구분)
 WORK="build"
 DIST="dist"
 
@@ -24,22 +25,32 @@ command -v jq      >/dev/null || { echo "✗ jq 필요" >&2; exit 1; }
 rm -rf "$WORK" "$DIST"
 mkdir -p "$WORK/ext" "$DIST"
 
+VERSIONS_JSON="$WORK/versions.json"
+curl -fsSL -o "$VERSIONS_JSON" "$AMO_API"
+LATEST_UPSTREAM=$(jq -r '.results | sort_by(.file.created) | reverse | .[0].version // empty' "$VERSIONS_JSON")
+[ -n "$LATEST_UPSTREAM" ] || { echo "✗ AMO 업스트림 버전을 찾을 수 없음" >&2; exit 1; }
+
 # PIN_VERSION 지정 시 해당 업스트림 버전으로 고정 — 롤백용이자 숙성 우회용
 # (급한 보안 패치는 workflow_dispatch 로 pin_version 을 주면 즉시 당겨온다).
 if [ -n "${PIN_VERSION:-}" ]; then
   echo "▶ 업스트림 $PIN_VERSION 고정 다운로드 (숙성 우회)"
-  XPI_SRC=$(curl -fsSL "$AMO_API" | jq -r --arg v "$PIN_VERSION" '
-    .results[] | select(.version == $v) | .file.url')
+  XPI_SRC=$(jq -r --arg v "$PIN_VERSION" '
+    .results[] | select(.version == $v) | .file.url' "$VERSIONS_JSON")
   [ -n "$XPI_SRC" ] || { echo "✗ AMO 최근 25개 버전에 $PIN_VERSION 없음" >&2; exit 1; }
 else
   # 갓 나온 릴리스는 건너뛴다. 업스트림 회귀는 대개 며칠 안에 신고·패치되므로,
   # 숙성만으로 CI 가 잡을 수 없는 런타임 버그 대부분을 걸러낸다.
   echo "▶ ${SOAK_DAYS}일 이상 묵은 최신 업스트림 탐색 ($SLUG)"
-  XPI_SRC=$(curl -fsSL "$AMO_API" | jq -r --argjson soak "$SOAK_DAYS" '
-      .results
-    | map(select((.file.created | fromdateiso8601) < (now - 86400 * $soak)))
+  XPI_SRC=$(jq -r --argjson soak "$SOAK_DAYS" --arg blocked "$BLOCKED_VERSIONS" '
+      ($blocked | split(",") | map(select(length > 0))) as $blocked_versions
+    | .results
+    | map(
+        .version as $version
+        | select(($blocked_versions | index($version)) == null)
+        | select((.file.created | fromdateiso8601) < (now - 86400 * $soak))
+      )
     | sort_by(.file.created) | reverse
-    | .[0].file.url // empty')
+    | .[0].file.url // empty' "$VERSIONS_JSON")
   [ -n "$XPI_SRC" ] || { echo "✗ ${SOAK_DAYS}일 넘게 묵은 업스트림 릴리스가 없음" >&2; exit 1; }
 fi
 curl -fsSL -o "$WORK/orig.xpi" "$XPI_SRC"
@@ -58,7 +69,12 @@ REV="${BUILD_REV:-0}"                 # CI 에서 github.run_number 주입 → �
 # AMO 는 id+version 중복 서명을 거부 → 4번째 자리로 회피.
 # VERSION_OVERRIDE: 롤백 시 필요. Firefox 는 버전이 내려가면 자동 업데이트를 안 하므로,
 # 옛 코드를 담되 버전 문자열은 현재 배포본보다 높게 찍어야 깨진 설치본이 스스로 복구된다.
-BUILD_VERSION="${VERSION_OVERRIDE:-${UPSTREAM}.${REV}}"
+VERSION_BASE="$UPSTREAM"
+if [ "$UPSTREAM" != "$LATEST_UPSTREAM" ]; then
+  # 롤백 코드를 Firefox 자동 업데이트로 밀어 넣으려면 현재 문제 버전보다 높아야 한다.
+  VERSION_BASE="$LATEST_UPSTREAM"
+fi
+BUILD_VERSION="${VERSION_OVERRIDE:-${VERSION_BASE}.${REV}}"
 echo "  upstream: $UPSTREAM  →  build: $BUILD_VERSION"
 
 echo "▶ manifest 가 참조하는 모든 아이콘 경로 수집"

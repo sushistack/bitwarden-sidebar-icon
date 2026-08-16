@@ -24,6 +24,7 @@ env:
   UPDATE_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/updates.json"
   UPSTREAM_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/UPSTREAM.txt"
   XPI_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/bitwarden-icon.xpi"
+  BLOCKED_VERSIONS: "2026.7.0"  # vault 목록 무한 로딩(WASM SDK 회귀)
 
 jobs:
   repackage:
