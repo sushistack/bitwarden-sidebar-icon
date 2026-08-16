@@ -29,7 +29,7 @@ env:
   UPDATE_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/updates.json"
   UPSTREAM_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/UPSTREAM.txt"
   XPI_URL: "https://github.com/sushistack/bitwarden-sidebar-icon/releases/download/latest/bitwarden-icon.xpi"
-  BLOCKED_VERSIONS: "2026.7.0"  # legacy/Vaultwarden 호환성 문제로 vault 목록 무한 로딩
+  BLOCKED_VERSIONS: ""  # 확인된 회귀가 생기면 쉼표로 구분해 추가
 
 jobs:
   repackage:

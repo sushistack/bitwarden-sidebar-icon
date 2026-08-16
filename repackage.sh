@@ -15,7 +15,7 @@ UPDATE_URL="https://github.com/sushistack/bitwarden-sidebar-icon/releases/downlo
 SRC_ICON="${1:-icon.png}"                # 교체할 단색 정사각 PNG (마스터 고해상도 권장)
 AMO_API="https://addons.mozilla.org/api/v5/addons/addon/$SLUG/versions/?page_size=25"
 SOAK_DAYS="${SOAK_DAYS:-14}"             # AMO 공개 후 이 일수가 지난 릴리스만 채택 (업스트림 회귀 숙성)
-BLOCKED_VERSIONS="${BLOCKED_VERSIONS:-2026.7.0}" # 확인된 회귀 버전 (쉼표 구분)
+BLOCKED_VERSIONS="${BLOCKED_VERSIONS:-}"          # 확인된 회귀 버전 (쉼표 구분, 기본값은 없음)
 WORK="build"
 DIST="dist"
 
